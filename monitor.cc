@@ -8,6 +8,8 @@
 #include <iostream>
 #include <iterator> // for std::ostream_iterator
 #include <algorithm>  // for std::copy
+#include <mutex>
+
 
 #define VMRSS_LINE 22
 #define VMSIZE_LINE 18
@@ -15,6 +17,8 @@
 
 using namespace std;
 
+
+std::mutex mtx;
 
 template <typename T>
 std::ostream& operator<< (std::ostream& out, const std::vector<T>& v) {
@@ -85,13 +89,17 @@ unsigned long get_cpu_total_occupy()
 
     fgets(buff, sizeof(buff), fd);
     char name[64] = {0};
+    // 用户态时间 user 
+    // 用户态时间(低优先级，nice>0)
+    // 内核态时间
+    // 空闲时间
     sscanf(buff, "%s %ld %ld %ld %ld", name, &t.user, &t.nice, &t.system, &t.idle);
     fclose(fd);
 
     return (t.user + t.nice + t.system + t.idle);
 }
 
-//获取进程的CPU时间
+// 获取进程的CPU时间
 unsigned long get_cpu_proc_occupy(unsigned int pid)
 {
 
@@ -124,24 +132,24 @@ float get_proc_cpu(unsigned int pid, int interval)
     unsigned long totalcputime1, totalcputime2;
     unsigned long procputime1, procputime2;
 
-    totalcputime1 = get_cpu_total_occupy();
-    procputime1 = get_cpu_proc_occupy(pid);
+    totalcputime1 = get_cpu_total_occupy(); // 获取总的 CPU 时间
+    procputime1 = get_cpu_proc_occupy(pid); // 获取对应进程的 CPU 时间
 
     // usleep(200000); // 0.2s
     usleep(interval * 1000 * 1000); // 2s
     // usleep(20000000); // 20s
 
 
-    totalcputime2 = get_cpu_total_occupy();
-    procputime2 = get_cpu_proc_occupy(pid);
+    totalcputime2 = get_cpu_total_occupy(); // 获取总的 CPU 时间
+    procputime2 = get_cpu_proc_occupy(pid); // 获取对应进程的 CPU 时间
 
     float pcpu = 0.0;
-    // printf("totalcputime-consumption: %u \n", totalcputime2 - totalcputime1);
+    printf("totalcputime-consumption: %u \n", totalcputime2 - totalcputime1);
     if (0 != totalcputime2 - totalcputime1)
     {
         // printf("procputime1: %u \n", procputime1);
         // printf("procputime2: %u \n", procputime2);
-        // printf("proccputime-consumption: %u \n", procputime2 - procputime1);
+        printf("proccputime-consumption: %u \n", procputime2 - procputime1);
         pcpu = 100.0 * (procputime2 - procputime1) / (totalcputime2 - totalcputime1);
     }
 
@@ -274,7 +282,7 @@ vector<float> get_cpu_usages(unsigned int pid, int interval, int total_time)
     vector<float> usages;
     for (size_t i = 0; i < total_time / interval; i++)
     {
-        float cpu_usage = get_proc_cpu(pid, interval);
+        float cpu_usage = get_proc_cpu(pid, interval); // 计算 CPU 使用率
         usages.push_back(cpu_usage);
     }
     return usages;
@@ -282,15 +290,17 @@ vector<float> get_cpu_usages(unsigned int pid, int interval, int total_time)
 
 void monitor(unsigned int pid) {
     // float cpu_usage = get_proc_cpu(pid, 2);
-    vector<float> cpu_usages = get_cpu_usages(pid, 2, 10);
-    unsigned int procmem = get_proc_mem(pid);
-    unsigned int virtualmem = get_proc_virtualmem(pid);
+    vector<float> cpu_usages = get_cpu_usages(pid, 2, 10); // 获取 CPU 使用情况，间隔 2s，总计 10s
+    unsigned int procmem = get_proc_mem(pid); // 获取进程占用的内存
+    unsigned int virtualmem = get_proc_virtualmem(pid); // 获取进程占用的虚拟内存
+    mtx.lock();
     printf("==================================\n");
     printf("pid=%d\n", pid);
     // printf("pcpu=%f\n", cpu_usage);
     cout << "pcpu=" << cpu_usages << endl;
     printf("procmem=%d\n", procmem); //kB
     printf("virtualmem=%d\n", virtualmem); //kB
+    mtx.unlock();
 }
 
 int main(int argc, char *argv[])
@@ -313,18 +323,18 @@ int main(int argc, char *argv[])
     else
     {
         // pid = get_pid(argv[1]);
-        pids = get_pids(argv[1]);
+        pids = get_pids(argv[1]); // 获取对应进程的 pids
     }
-    printf("%ld pids\n", pids.size());
+    printf("%ld pids\n", pids.size()); // 输出对应进程的 pids 个数
     vector<std::thread*> threads;
 
     for (size_t i = 0; i < pids.size(); i++)
     {
-        threads.push_back(new std::thread(monitor, pids[i]));
+        threads.push_back(new std::thread(monitor, pids[i])); // 给每个 pid 创建一个 monitor 线程
     }
     for (size_t i = 0; i < pids.size(); i++)
     {
-        threads[i]->join();
+        threads[i]->join(); // 等待每个 monitor 执行完
     }
     return 0;
 }
